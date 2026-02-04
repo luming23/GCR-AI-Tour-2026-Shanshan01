@@ -22,6 +22,8 @@ jobs:
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID || secrets.AZURE_SUBSCRIPTION_ID }}
       AZURE_AI_PROJECT_ENDPOINT: ${{ vars.AZURE_AI_PROJECT_ENDPOINT || secrets.AZURE_AI_PROJECT_ENDPOINT }}
       AZURE_AI_MODEL_DEPLOYMENT_NAME: ${{ vars.AZURE_AI_MODEL_DEPLOYMENT_NAME || secrets.AZURE_AI_MODEL_DEPLOYMENT_NAME || 'gpt-5-mini' }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || secrets.AZURE_RESOURCE_GROUP }}
+      SWA_NAME: ${{ vars.SWA_NAME || secrets.SWA_NAME }}
 
     steps:
       - name: Checkout
@@ -63,11 +65,22 @@ jobs:
             missing=1
           fi
 
+          # Static Web Apps deployment config.
+          if [[ -z "${AZURE_RESOURCE_GROUP}" ]]; then
+            echo "Missing AZURE_RESOURCE_GROUP (set as GitHub Actions Variable or Secret)." >&2
+            missing=1
+          fi
+          if [[ -z "${SWA_NAME}" ]]; then
+            echo "Missing SWA_NAME (set as GitHub Actions Variable or Secret)." >&2
+            missing=1
+          fi
+
           if [[ "${missing}" != "0" ]]; then
             echo >&2
             echo "How to fix (recommended):" >&2
             echo "- Run scripts/setup_github_actions_oidc.sh --configure-github (or .ps1) to auto-create OIDC + set Variables" >&2
             echo "- Or set repo Variables in: Settings → Secrets and variables → Actions → Variables" >&2
+            echo "- For Static Web Apps, set AZURE_RESOURCE_GROUP + SWA_NAME, or run workflow: deploy-frontend-swa" >&2
             exit 1
           fi
 
@@ -144,6 +157,44 @@ jobs:
             echo;
             cat "$src";
           } > frontend/report.md
+
+      - name: Get SWA deployment token
+        id: swa_token
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! az staticwebapp show --name "${SWA_NAME}" --resource-group "${AZURE_RESOURCE_GROUP}" >/dev/null 2>&1; then
+            echo "Static Web App not found: ${SWA_NAME} (rg=${AZURE_RESOURCE_GROUP})." >&2
+            echo "Run workflow 'deploy-frontend-swa' to create it, or fix SWA_NAME/AZURE_RESOURCE_GROUP." >&2
+            exit 1
+          fi
+
+          token=""
+          for _ in $(seq 1 30); do
+            token=$(az staticwebapp secrets list --name "${SWA_NAME}" --resource-group "${AZURE_RESOURCE_GROUP}" --query properties.apiKey -o tsv 2>/dev/null || true)
+            if [[ -n "$token" && "$token" != "null" ]]; then
+              break
+            fi
+            sleep 4
+          done
+          if [[ -z "$token" || "$token" == "null" ]]; then
+            echo "Failed to retrieve SWA deployment token." >&2
+            exit 1
+          fi
+
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy frontend to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.swa_token.outputs.token }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: "upload"
+          app_location: "frontend"
+          output_location: ""
+          api_location: ""
+          skip_app_build: true
 
       - name: Commit and push frontend update
         shell: bash

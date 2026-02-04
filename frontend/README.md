@@ -27,6 +27,16 @@
 
 这样 SWA 会把 `frontend/` 作为静态站点根目录进行部署。
 
+本仓库已提供两种 GitHub Actions 方式：
+
+- 一次性创建/部署：运行工作流 `deploy-frontend-swa`（.github/workflows/deploy_frontend_swa.yml），它会创建 SWA（如不存在）并部署 `frontend/`。
+- 持续自动部署：`tech-insight-workflow` 在每次生成最新 `frontend/report.md` 后，会自动部署到 SWA。
+
+为启用持续自动部署，请在仓库 Variables/Secrets 中设置：
+
+- `AZURE_RESOURCE_GROUP`: Static Web Apps 所在资源组
+- `SWA_NAME`: Static Web Apps 资源名
+
 ### 可选：使用 SWA CLI 初始化（仅在有 Node 的环境）
 
 如果你在另一台机器/CI 上有 Node，可使用：
